@@ -1,0 +1,14 @@
+# CANDIDATE, not final (D2). Tier 2 held-out split, option C: "camera-balanced val,
+# small people in train".
+# - test: MOT17-02 (static, heaviest occlusion) + MOT17-10 (moving, night)
+# - val: MOT17-09 (static) + MOT17-11 (moving), so tracker tuning sees both camera types;
+#   but val has almost no small (<50 px) people, so detection thresholds chosen on val
+#   are tuned on large people.
+# - train: MOT17-04, MOT17-05, MOT17-13; MOT17-13 brings most of the small boxes into train.
+name: tier2_candidate_c
+tier: 2
+dataset: MOT17
+splits:
+  train: [MOT17-04, MOT17-05, MOT17-13]
+  val: [MOT17-09, MOT17-11]
+  test: [MOT17-02, MOT17-10]

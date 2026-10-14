@@ -1,0 +1,11 @@
+# CANDIDATE, not final (D2). Tier 2 held-out split, option B: "dense scene held out".
+# - test: MOT17-04 (static, elevated, densest) + MOT17-13 (moving bus)
+# - train loses MOT17-04, so it keeps only ~30% of kept boxes; test holds ~58%.
+# - MOT17-05 (640x480 / 14 FPS) is in train.
+name: tier2_candidate_b
+tier: 2
+dataset: MOT17
+splits:
+  train: [MOT17-02, MOT17-05, MOT17-09, MOT17-11]
+  val: [MOT17-10]
+  test: [MOT17-04, MOT17-13]

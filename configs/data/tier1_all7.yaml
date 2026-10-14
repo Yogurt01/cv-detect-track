@@ -1,0 +1,8 @@
+# Tier 1 (zero-training) evaluation: COCO-pretrained detectors, default tracker
+# parameters, thresholds fixed in advance. Every unique MOT17 train sequence is
+# evaluated; results are reported per sequence and per camera type (D2).
+name: tier1_all7
+tier: 1
+dataset: MOT17
+splits:
+  eval: [MOT17-02, MOT17-04, MOT17-05, MOT17-09, MOT17-10, MOT17-11, MOT17-13]
