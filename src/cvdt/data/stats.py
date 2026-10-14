@@ -14,8 +14,12 @@ from cvdt.data.filtering import Category
 from cvdt.data.mot import MOTClass, load_gt, read_seqinfo
 
 HEIGHT_BUCKETS = {"small": (0, 50), "medium": (50, 150), "large": (150, np.inf)}  # px, [lo, hi)
-VIS_BUCKETS = {"<0.25": (0, 0.25), "0.25-0.5": (0.25, 0.5), "0.5-0.75": (0.5, 0.75),
-               ">=0.75": (0.75, 1.01)}
+VIS_BUCKETS = {
+    "<0.25": (0, 0.25),
+    "0.25-0.5": (0.25, 0.5),
+    "0.5-0.75": (0.5, 0.75),
+    ">=0.75": (0.75, 1.01),
+}
 
 
 def camera_motion(img_dir: Path, n_frames: int, step: int = 10, work_width: int = 640) -> dict:
@@ -61,8 +65,9 @@ def sequence_stats(seq_dir: Path, meta: dict, min_visibility: float) -> dict:
     si = read_seqinfo(seq_dir / "seqinfo.ini")
     n = int(si["seqLength"])
     df = load_gt(seq_dir / "gt" / "gt.txt")
-    cat = filtering.categorize(df["cls"].to_numpy(), df["conf"].to_numpy(), df["vis"].to_numpy(),
-                               min_visibility)
+    cat = filtering.categorize(
+        df["cls"].to_numpy(), df["conf"].to_numpy(), df["vis"].to_numpy(), min_visibility
+    )
     reason = filtering.ignore_reason(df["cls"].to_numpy(), cat)
     ped = df[(df["cls"] == MOTClass.PEDESTRIAN) & (df["conf"] == 1)]
     kept = df[cat == Category.POSITIVE]
@@ -118,14 +123,28 @@ def compute_stats(canon_root: Path, min_visibility: float) -> pd.DataFrame:
 
 
 MD_COLUMNS = {
-    "sequence": "Seq", "camera": "Camera", "camera_motion_px_median": "Motion px/f (med)",
-    "frames": "Frames", "width": "W", "height": "H", "fps": "FPS", "gt_tracks": "GT tracks",
-    "ped_flag1": "Ped (flag 1)", "kept_positive": "Kept", "share_of_kept_pct": "Kept %",
-    "low_visibility": "Low-vis", "ignore_distractor_class": "Ign. distr.",
-    "ignore_zero_flag": "Ign. flag0", "people_per_frame_mean": "People/f mean",
-    "people_per_frame_max": "People/f max", "ped_vis_<0.25_pct": "Vis<0.25 %",
-    "ped_vis_median": "Vis med", "kept_h_small_pct": "H<50 %", "kept_h_medium_pct": "H 50-150 %",
-    "kept_h_large_pct": "H>150 %", "kept_h_median_px": "H med px",
+    "sequence": "Seq",
+    "camera": "Camera",
+    "camera_motion_px_median": "Motion px/f (med)",
+    "frames": "Frames",
+    "width": "W",
+    "height": "H",
+    "fps": "FPS",
+    "gt_tracks": "GT tracks",
+    "ped_flag1": "Ped (flag 1)",
+    "kept_positive": "Kept",
+    "share_of_kept_pct": "Kept %",
+    "low_visibility": "Low-vis",
+    "ignore_distractor_class": "Ign. distr.",
+    "ignore_zero_flag": "Ign. flag0",
+    "people_per_frame_mean": "People/f mean",
+    "people_per_frame_max": "People/f max",
+    "ped_vis_<0.25_pct": "Vis<0.25 %",
+    "ped_vis_median": "Vis med",
+    "kept_h_small_pct": "H<50 %",
+    "kept_h_medium_pct": "H 50-150 %",
+    "kept_h_large_pct": "H>150 %",
+    "kept_h_median_px": "H med px",
 }
 
 

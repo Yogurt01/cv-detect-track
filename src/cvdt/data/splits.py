@@ -34,10 +34,7 @@ def hash_overlap(split: SplitConfig, manifest: Path) -> dict[tuple[str, str], in
     df = pd.read_csv(manifest)
     hashes = {k: set(df.loc[df["sequence"].isin(v), "sha256"]) for k, v in split.splits.items()}
     names = sorted(hashes)
-    return {
-        (a, b): len(hashes[a] & hashes[b])
-        for i, a in enumerate(names) for b in names[i + 1:]
-    }
+    return {(a, b): len(hashes[a] & hashes[b]) for i, a in enumerate(names) for b in names[i + 1 :]}
 
 
 def summarize(split: SplitConfig, stats: pd.DataFrame) -> pd.DataFrame:

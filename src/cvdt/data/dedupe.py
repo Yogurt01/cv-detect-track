@@ -107,8 +107,12 @@ def dedupe_mot17(raw_train: Path, canon_root: Path, variant: str = "FRCNN") -> d
         r = compare_variants(variants)
         all_hashes[seq] = r.pop("_hashes")
         report["sequences"][seq] = r
-        if not (r["same_file_names"] and r["differing_images"] == 0 and r["gt_identical"]
-                and r["seqinfo_identical_except_name"]):
+        if not (
+            r["same_file_names"]
+            and r["differing_images"] == 0
+            and r["gt_identical"]
+            and r["seqinfo_identical_except_name"]
+        ):
             mismatched.append(seq)
     if mismatched:
         # Report, but do not build a canonical copy: the choice needs a human decision.

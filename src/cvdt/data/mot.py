@@ -62,8 +62,17 @@ def load_gt(path: Path) -> pd.DataFrame:
     """Load a MOT ``gt.txt`` with typed columns :data:`GT_COLUMNS` (raw MOT convention)."""
     df = pd.read_csv(path, header=None, names=GT_COLUMNS)
     return df.astype(
-        {"frame": int, "id": int, "x": float, "y": float, "w": float, "h": float,
-         "conf": int, "cls": int, "vis": float}
+        {
+            "frame": int,
+            "id": int,
+            "x": float,
+            "y": float,
+            "w": float,
+            "h": float,
+            "conf": int,
+            "cls": int,
+            "vis": float,
+        }
     )
 
 

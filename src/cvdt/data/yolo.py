@@ -88,8 +88,9 @@ def convert_sequence(seq_dir: Path, out_dir: Path, min_visibility: float) -> dic
     img_src = seq_dir / si.get("imDir", "img1")
     df = load_gt(seq_dir / "gt" / "gt.txt")
 
-    cat = filtering.categorize(df["cls"].to_numpy(), df["conf"].to_numpy(), df["vis"].to_numpy(),
-                               min_visibility)
+    cat = filtering.categorize(
+        df["cls"].to_numpy(), df["conf"].to_numpy(), df["vis"].to_numpy(), min_visibility
+    )
     reason = filtering.ignore_reason(df["cls"].to_numpy(), cat)
     xyxy = mot_to_xyxy(df[["x", "y", "w", "h"]].to_numpy())
     clipped = clip_xyxy(xyxy, W, H)
@@ -109,9 +110,7 @@ def convert_sequence(seq_dir: Path, out_dir: Path, min_visibility: float) -> dic
     for f in range(1, n_frames + 1):
         stem = f"{f:06d}"
         _link(img_src / f"{stem}{ext}", out_dir / "images" / f"{stem}{ext}")
-        lines = [
-            "0 {:.6f} {:.6f} {:.6f} {:.6f}".format(*yolo[i]) for i in by_frame.get(f, [])
-        ]
+        lines = ["0 {:.6f} {:.6f} {:.6f} {:.6f}".format(*yolo[i]) for i in by_frame.get(f, [])]
         (out_dir / "labels" / f"{stem}.txt").write_text("\n".join(lines) + ("\n" if lines else ""))
 
     ign = np.flatnonzero((cat == Category.IGNORE) | (cat == Category.LOW_VISIBILITY))

@@ -27,8 +27,11 @@ def open_sequence(seq: str, cfg: dict | None = None) -> MOT17Sequence:
     cfg = cfg or dataset_config()
     meta = dict(cfg["sequences"][seq])
     camera = meta.pop("camera")
-    return MOT17Sequence(REPO_ROOT / cfg["canonical_root"] / seq, camera=camera,
-                         extra={k: str(v) for k, v in meta.items()})
+    return MOT17Sequence(
+        REPO_ROOT / cfg["canonical_root"] / seq,
+        camera=camera,
+        extra={k: str(v) for k, v in meta.items()},
+    )
 
 
 @dataclass(frozen=True)
@@ -49,8 +52,11 @@ class SplitConfig:
 def load_split(path: Path) -> SplitConfig:
     d = load_yaml(path)
     return SplitConfig(
-        name=d["name"], tier=int(d["tier"]), dataset=d["dataset"],
-        splits={k: list(v) for k, v in d["splits"].items()}, path=Path(path),
+        name=d["name"],
+        tier=int(d["tier"]),
+        dataset=d["dataset"],
+        splits={k: list(v) for k, v in d["splits"].items()},
+        path=Path(path),
     )
 
 
