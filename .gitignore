@@ -1,0 +1,43 @@
+# --- Private notes (never published) ---
+/private/
+
+# --- Datasets (downloaded / derived; see scripts/prepare_data.py) ---
+/data/
+*.zip
+*.tar
+*.tar.gz
+
+# --- Model weights and exported engines ---
+*.pt
+*.pth
+*.onnx
+*.engine
+*.safetensors
+*.torchscript
+weights/
+
+# --- Run outputs ---
+runs/
+outputs/
+kaggle/**/output/
+# Rendered frames contain dataset images (MOT17 is CC BY-NC-SA); keep them local.
+reports/figures/data_check/
+*.mp4
+*.avi
+
+# --- Python / tooling caches ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.ipynb_checkpoints/
+build/
+dist/
+
+# --- Editors / OS ---
+.vscode/
+.idea/
+.DS_Store
