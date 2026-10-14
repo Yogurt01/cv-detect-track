@@ -1,0 +1,34 @@
+# MOT17 dataset metadata and label rule. Not a split: splits live in tier*.yaml.
+dataset: MOT17
+canonical_root: data/mot17/train   # built by `scripts/prepare_data.py dedupe`
+yolo_root: data/yolo/mot17         # built by `scripts/prepare_data.py convert`
+
+labels:
+  # Training labels only: pedestrian boxes (flag 1) below this visibility are not
+  # positives (they act as background during training, D9).
+  # Default used by `scripts/prepare_data.py convert`.
+  min_visibility_train: 0.25
+  # D9: the training threshold is a Tier 2 choice; E4a uses 0.1, E4b uses 0.25,
+  # selected by HOTA on val (tie rule: |dHOTA| < 1.0 -> 0.25).
+  min_visibility_train_options: [0.1, 0.25]
+
+eval:
+  detection:
+    # D10: fixed in advance, never tuned, independent of the training threshold.
+    # Primary protocol: pedestrians below this visibility and distractor classes
+    # (2, 7, 8, 12) are ignore regions. Secondary protocol: all pedestrians positive.
+    ignore_visibility_below: 0.25
+  # Tracking evaluation uses neither key: standard TrackEval MOT17 handling.
+
+# Camera type and viewpoint: MOT16 paper (arXiv:1603.00831), Tab. 2, training
+# sequences (MOT17 uses the same videos). Camera type was also checked by viewing
+# frames and by a global-motion estimate (results/data_stats.csv, camera_motion_px).
+# Descriptions: MOT17 data page, https://motchallenge.net/data/MOT17/
+sequences:
+  MOT17-02: {camera: static, viewpoint: medium, description: "People walking around a large square."}
+  MOT17-04: {camera: static, viewpoint: high,   description: "Pedestrian street at night, elevated viewpoint"}
+  MOT17-05: {camera: moving, viewpoint: medium, description: "Street scene from a moving platform"}
+  MOT17-09: {camera: static, viewpoint: low,    description: "A pedestrian street scene filmed from a low angle."}
+  MOT17-10: {camera: moving, viewpoint: medium, description: "A pedestrian scene filmed at night by a moving camera"}
+  MOT17-11: {camera: moving, viewpoint: medium, description: "Forward moving camera in a busy shopping mall"}
+  MOT17-13: {camera: moving, viewpoint: high,   description: "Filmed from a bus on a busy intersection"}
