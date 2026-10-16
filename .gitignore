@@ -14,14 +14,14 @@
 *.engine
 *.safetensors
 *.torchscript
-weights/
+/weights/
 
 # --- Run outputs ---
-runs/
-outputs/
+/runs/
+/outputs/
 kaggle/**/output/
 # Rendered frames contain dataset images (MOT17 is CC BY-NC-SA); keep them local.
-reports/figures/data_check/
+/reports/figures/data_check/
 *.mp4
 *.avi
 

@@ -20,10 +20,12 @@ dependencies = [
     # Upstream TrackEval, pinned to its last commit (2022-11-29). It uses numpy
     # aliases removed in NumPy 1.24; see cvdt.eval.trackeval_compat.
     "trackeval @ git+https://github.com/JonathonLuiten/TrackEval@12c8791b303e0a0b50f753af204249e622d0281a",
+    "tabulate>=0.9",  # imported by TrackEval at load time; silences its import warning
 ]
 
 [dependency-groups]
 dev = [
+    "pycocotools>=2.0.11",
     "pytest>=8.3",
     "ruff>=0.8",
 ]
@@ -47,6 +49,9 @@ explicit = true
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra"
+markers = [
+    "integration: needs MOT17 data, weights, a detection cache and a CUDA GPU; skips otherwise",
+]
 
 [tool.ruff]
 line-length = 100
