@@ -22,7 +22,18 @@ class Tracker(Protocol):
     name: str
     """Short identifier used in configs and result files, e.g. ``"bytetrack-own"``."""
 
-    def update(self, detections: Detections, frame: np.ndarray | None = None) -> Tracks:
+    needs_frame: bool
+    """True if :meth:`update` uses the image (appearance features or global motion
+    compensation). Callers working from cached detections may skip decoding frames
+    for trackers where this is False."""
+
+    def update(
+        self,
+        detections: Detections,
+        frame: np.ndarray | None = None,
+        *,
+        loose: Detections | None = None,
+    ) -> Tracks:
         """Associate this frame's detections with existing tracks.
 
         Args:
@@ -30,6 +41,9 @@ class Tracker(Protocol):
             frame: Optional (H, W, 3) BGR image, for trackers that use appearance
                 features or global motion compensation. Motion-only trackers
                 ignore it.
+            loose: Optional detections of the same frame from a looser NMS pass
+                (DECISIONS.md D16). Only trackers that recover NMS-suppressed boxes
+                (TrackTrack) use it; all others ignore it.
 
         Returns:
             Tracks that are output for this frame (confirmed tracks matched in
