@@ -13,6 +13,14 @@ Phase 1 studies pedestrians on MOT17, with every result stratified by static vs 
 - **Tier 1, zero training.** COCO-pretrained detectors, default tracker parameters and thresholds fixed in advance. Evaluated on all 7 unique MOT17 train sequences and reported per sequence and per camera type ([configs/data/tier1_all7.yaml](configs/data/tier1_all7.yaml)).
 - **Tier 2, anything learned from MOT17.** Covers fine-tuning, tracker tuning and threshold selection, using a sequence-level train/val/test split whose test set is 1 static + 1 moving sequence. Tier 2 choices use only train/val sequences. Selected split (D8, [configs/data/tier2.yaml](configs/data/tier2.yaml)): train MOT17-04, -05, -13; val MOT17-09, -11; test MOT17-02, -10.
 - **Pre-declared selection rules.** The training-label visibility threshold (0.1 vs 0.25) is chosen on val (D9). The fine-tuning input size is chosen from Tier 1 results excluding the Tier 2 test sequences (D11). The detection-evaluation ground truth is fixed in advance and independent of training choices (D10).
+- **Detection evaluation with ignore regions (D19).** After one-to-one matching to positives, each unmatched detection is handled in this order:
+  1. **Duplicate guard.** IoU ≥ 0.5 with any positive → false positive.
+  2. **Distractor classes** (2, 7, 8, 12). IoU ≥ 0.5 → removed.
+  3. **Low-visibility pedestrians** (visibility < 0.25). Their boxes are full-body, while detectors box the visible part, so these use intersection over the detection's area: IoA ≥ 0.5 → removed.
+  4. Otherwise, false positive.
+
+  Every detection result is also reported under the earlier IoU-only rule (D13) as a sensitivity analysis. The rule was changed after smoke values were seen; D19 records why.
+- **Real-time (D20).** Perception latency is preprocess + inference + postprocess + tracking from a decoded frame. A configuration is real-time if its p95 perception latency is ≤ 33.3 ms (30 FPS). End-to-end latency (with JPEG decoding) and throughput are reported as secondary numbers. See [Speed protocol](#speed-protocol-d20).
 - The literature "half" split may appear later as a secondary number, labelled *leaky, for comparability only*.
 
 ## Setup
@@ -68,6 +76,88 @@ Detection evaluation uses its own, fixed threshold (`eval.detection.ignore_visib
 
 In MOT17 the flag is fully determined by class: every class-1 box has flag 1 and every other box has flag 0, so the `zero_flag` path never fires on MOT17. MOT boxes are full-extent and may extend past the image border; YOLO labels are clipped to the image.
 
+## Weights and pipeline
+
+Detector weights are downloaded once into `weights/` (git-ignored). They are AGPL-3.0, see B2 below.
+
+```bash
+for m in yolo26n yolo26s; do curl -sSfL -o weights/$m.pt https://github.com/ultralytics/assets/releases/download/v8.4.0/$m.pt; done
+```
+
+```bash
+sha256sum weights/yolo26n.pt weights/yolo26s.pt
+```
+
+Expected checksums:
+
+| File | SHA256 |
+|---|---|
+| `yolo26n.pt` | `9b09cc8bf347f0fc8a5f7657480587f25db09b34bf33b0652110fb03a8ad4fef` |
+| `yolo26s.pt` | `646f8bc3fe0a656803d95c294f7852321748cb29d13466a1af8862e2db384a1b` |
+
+The chain is frames → detector → tracker → MOT file → TrackEval. Accuracy runs read cached detections, so every tracker sees identical input; speed runs are always live (D15).
+
+1. Cache detections. This writes `outputs/detections/<key>/` with one `.npz` file per sequence and a `meta.json`. Settings are FP32, conf floor 0.01, person class only, plus the loose-NMS pass used by TrackTrack (D16).
+
+   ```bash
+   uv run python scripts/cache_detections.py --weights weights/yolo26s.pt --imgsz 640 --seqs MOT17-09 MOT17-05
+   ```
+
+2. Track from the cache, write MOT files and evaluate with TrackEval. Outputs go to `outputs/tracks/<run-name>/`. The tracker is one of `bytetrack`, `botsort`, `ocsort`, `deepocsort`, `fasttrack` or `tracktrack`.
+
+   ```bash
+   uv run python scripts/run_track.py --cache outputs/detections/<key> --tracker bytetrack --seqs MOT17-09 MOT17-05 --run-name demo --eval
+   ```
+
+3. Detection metrics (AP50, AP50:95, P/R at conf 0.25) with ignore regions. The script reports the D19 rule and the D13 sensitivity rule side by side, plus ignore and duplicate-guard counts (D10, D19):
+
+   ```bash
+   uv run python scripts/eval_det.py --cache outputs/detections/<key> --seqs MOT17-09 MOT17-05 --protocol primary
+   ```
+
+4. Live run with per-stage timings and GPU clocks / performance state. `--video` writes an annotated MP4, which stays local.
+
+   ```bash
+   uv run python scripts/run_track.py --weights weights/yolo26s.pt --imgsz 640 --tracker bytetrack --seqs MOT17-09 --run-name live --timing
+   ```
+
+Conventions and safeguards:
+
+- **Coordinates.** Internal boxes are 0-based xyxy pixels. MOT files use 1-based frames and 1-based coordinates.
+- **Tracker input.** Detections at conf ≥ 0.1 (D18). Lost-track buffers are scaled to the sequence frame rate (D17).
+- **TrackTrack.** It also receives the boxes that tight NMS dropped but a loose NMS (IoU 0.95) kept. This re-runs only NMS on the raw predictions of the single forward pass, as Ultralytics does (D16).
+- **Tier 2 test sequences.** The scripts refuse to run on them (D2) unless `--allow-tier2-test` is given.
+- **Consistency test.** `tests/test_cache_vs_live.py` checks cache vs live vs Ultralytics' own `model.track()`. It runs when data, weights, cache and a GPU are present.
+
+## Speed protocol (D20)
+
+```bash
+uv run python scripts/bench_speed.py --weights weights/yolo26s.pt --imgsz 640 --tracker bytetrack --name <run-name>
+```
+
+- **What is timed.** The detector always runs live, never from the cache. Batch 1, 50 warm-up frames, then the whole sequence is timed (≥ 500 frames).
+- **Per frame.** With CUDA synchronisation, the script records:
+  - read and JPEG decode;
+  - perception latency: detector call (preprocess, inference, postprocess) plus tracker update;
+  - end-to-end latency: decode plus perception.
+
+  Rendering and file writing are excluded.
+- **Reported values:**
+  - p50 / p95 / p99 for both latencies;
+  - throughput;
+  - peak GPU memory;
+  - Ultralytics' own per-stage profile;
+  - whether p95 perception latency is ≤ 33.3 ms.
+- **Sequences.** MOT17-04 (1,050 frames, 1080p, densest scene) and MOT17-05 (640×480).
+- **Hardware state.** AC power, power profile, CPU governor, GPU clocks and performance state are recorded before and after; the script never changes them. It stops if the machine is not on AC power.
+- **Variants:**
+  - `--weights` (n / s);
+  - `--imgsz` (640 / 960);
+  - `--half` (FP16);
+  - `--nms-free` (NMS-free one-to-one head; speed study only, D16);
+  - `--tracker` (any of the six).
+- **Output.** `outputs/bench/<run-name>.json` (git-ignored).
+
 ## Dataset statistics
 
 From `results/data_stats.csv`:
@@ -92,29 +182,33 @@ The per-sequence frame, track and pedestrian-box counts match the official MOT17
 
 ## Licenses & data
 
-Facts below were checked on 2026-10-14 against the sources linked.
+Facts below were checked on 2026-10-14 against the sources linked; B1 was updated on 2026-10-16.
 
 **Code.** This repository is licensed under [AGPL-3.0](LICENSE), because it depends on Ultralytics, which is AGPL-3.0.
 
-**B1. MOT17 dataset license.**
+**B1. MOT17 dataset license: CC BY-NC-SA 3.0, confirmed** ([CC BY-NC-SA 3.0](https://creativecommons.org/licenses/by-nc-sa/3.0/); D14).
 
-- **Not verifiable on the primary source as of 2026-10-14.** The MOTChallenge website is offline: [motchallenge.net](https://motchallenge.net/) returns HTTP 410 and states that the benchmark, evaluation server and accounts are offline. Dataset archives and a static leaderboard archive (state of 16 April 2026) stay available at their old addresses.
-- No surviving page (e.g. [MOT17 data page](https://motchallenge.net/data/MOT17/)) states a license, and the archive contains no license file.
-- Secondary sources consistently report **CC BY-NC-SA 3.0**. This project treats MOT17 as CC BY-NC-SA 3.0: attribution, non-commercial use only, and adaptations shared under the same license.
-- No dataset files are redistributed here. Users download MOT17 from the official address with `scripts/prepare_data.py`.
-- Until the license is confirmed, no MOT17 frames, annotations or derived images are redistributed on GitHub or Kaggle (D12).
+- The MOTChallenge maintainers (TUM) confirmed by email on 2026-10-16 that MOT17 images and annotations are released under CC BY-NC-SA 3.0. That means attribution, non-commercial use only, and adaptations shared under the same license.
+- Background: the MOTChallenge website is offline ([motchallenge.net](https://motchallenge.net/) returns HTTP 410), so no surviving page states the license. Dataset archives remain available at their old addresses, e.g. the [MOT17 data page](https://motchallenge.net/data/MOT17/).
+- **Provenance caveat.** Not every sequence was recorded by the MOTChallenge authors:
+  - MOT17-05 and -06 come from the ETH dataset (A. Ess, B. Leibe, L. Van Gool, *Depth and Appearance for Mobile Scene Analysis*, ICCV 2007, [doi:10.1109/ICCV.2007.4409092](https://doi.org/10.1109/ICCV.2007.4409092));
+  - MOT17-01 and -02 come from a publicly available video.
 
-**Demo GIF / figures from MOT17 frames.** A GIF or figure built from MOT17 frames is an adaptation of the dataset, not part of the AGPL code. Under CC BY-NC-SA 3.0 it must:
+  For those sequences, the original sources' conditions may apply in addition.
+- No dataset files are redistributed here: no MOT17 frames, annotations or derived images on GitHub or Kaggle. Users download MOT17 from the official address with `scripts/prepare_data.py`.
+- A private, non-shared copy on a cloud compute platform (e.g. Kaggle) for training is allowed. Publishing it as a Kaggle dataset, or redistributing it otherwise, is not.
 
-- credit the dataset,
-- not be used commercially, and
-- be marked as licensed under CC BY-NC-SA 3.0, separately from the code license.
+**Demo GIF / video from MOT17 frames.** A demo built from MOT17 frames is an adaptation of the dataset, not part of the AGPL code. Rules:
 
-Rendered frames are git-ignored. The source of any demo media is an open question (D12); if MOT17-derived media is ever published, it will carry that notice.
+- **Allowed under CC BY-NC-SA 3.0.** It must credit the dataset, must not be used commercially, and must be marked as licensed under CC BY-NC-SA 3.0, separately from the code license.
+- **Sequences.** Demo material uses only sequences recorded by the MOTChallenge authors: MOT17-04, -11 and -13. Never 01, 02, 05 or 06 (D14).
+- **Local renders.** Rendered frames and annotated videos are git-ignored and stay local.
 
 **Attribution.** MOT17 uses the MOT16 videos with updated annotations. Cite:
 
 > A. Milan, L. Leal-Taixé, I. Reid, S. Roth, K. Schindler. *MOT16: A Benchmark for Multi-Object Tracking.* arXiv:1603.00831, 2016. https://arxiv.org/abs/1603.00831
+
+and link the dataset page: https://motchallenge.net/data/MOT17/.
 
 **B2. Ultralytics code and YOLO26 weights.**
 
@@ -144,7 +238,7 @@ Rendered frames are git-ignored. The source of any demo media is an open questio
 - The COCO-JSON loader skips `iscrowd` annotations entirely.
 - The only crowd-aware path is `save_json` with a COCO-format ground truth passed to `faster_coco_eval`. It applies COCO crowd semantics (intersection-over-detection-area), which differ from the MOT rule above.
 
-Detection metrics with ignore regions will therefore use a small dedicated evaluator, specified in D13 and planned for the pipeline stage.
+Detection metrics with ignore regions therefore use a small dedicated evaluator, specified in D13 and implemented in `cvdt.eval.detection`. It matches pycocotools exactly on data without ignore regions.
 
 **TrackEval.**
 
@@ -157,7 +251,11 @@ Detection metrics with ignore regions will therefore use a small dedicated evalu
 - **Tier 2 val has no small people.** MOT17-09 and -11 contain no kept boxes under 50 px, so val cannot show effects on small people. Input size is therefore chosen from Tier 1 results instead (D11).
 - **Ground truth may miss very small, distant people.** A detector at a higher input size may find people the annotation lacks, which would show up as lower precision. To be verified in the failure analysis.
 - **Full-extent vs visible-part boxes.** MOT boxes are full-extent (amodal), while COCO-pretrained detectors box the visible part. This lowers the measured recall for occluded people.
-- **MOT17 license unconfirmed from the primary source.** CC BY-NC-SA 3.0 is assumed; see D12.
+- **Full-body ignore boxes vs visible-part detections.**
+  - Under the IoU-only rule (D13), detections of the visible part of occluded people were about 28% (MOT17-09) and 35% (MOT17-05) of all false positives (yolo26s, 640, conf ≥ 0.25).
+  - D19 uses IoA for these regions, which reduces that to 10% and 2%. What remains are duplicates caught by the duplicate guard.
+  - D19 is stricter than D13 at high IoU thresholds, where poorly localised boxes on visible people can no longer be excused by an overlapping ignore box.
+  - Both rules are reported.
 
 ## Results
 

@@ -1,30 +1,40 @@
 # Project status
 
-Updated 2026-10-14. Decisions are referenced by ID; see [DECISIONS.md](DECISIONS.md).
+Updated 2026-10-16. Decisions are referenced by ID; see [DECISIONS.md](DECISIONS.md).
 
 ## Done
 
-- **Setup + data stage** (D1–D7): reviewed, accepted and committed by the owner (9 commits on `main`).
-  - Environment, interfaces and TrackEval (with the alias shim).
-  - MOT17 downloaded, deduplicated to 7 sequences, statistics computed, YOLO labels written, check frames reviewed.
-- **Review decisions recorded** (D8–D13):
-  - Tier 2 split selected: `configs/data/tier2.yaml` (D8).
-  - Training visibility threshold: a Tier 2 choice between 0.1 and 0.25 (D9).
-  - Detection-evaluation ground truth fixed in advance (D10).
-  - Input-size selection rule (D11).
-  - MOT17 license assumption and no redistribution (D12).
-  - Own detection evaluator specified (D13).
-- **Repo hygiene safeguards:** `tests/test_repo_hygiene.py` fails if an ignore rule hides source, test, script or config files, or matches a tracked file.
+- **Setup + data stage** (D1–D13): committed.
+- **D14–D20 recorded:**
+  - D14: MOT17 license confirmed.
+  - D15: pipeline architecture.
+  - D16–D18: inference mode, FPS-scaled track buffer and pipeline defaults (approved).
+  - D19: ignore matching for low-visibility pedestrians.
+  - D20: real-time definition and speed protocol.
+- **Pipeline stage** (D15):
+  - detector wrapper;
+  - detection cache;
+  - adapters for all six trackers;
+  - run loop and MOT writer;
+  - TrackEval wrapper;
+  - detection evaluator;
+  - stage timers.
+- **Verification:**
+  - Cache vs live is identical, and the adapter reproduces Ultralytics' own tracking for ByteTrack and TrackTrack.
+  - Live TrackTrack now runs one forward pass per frame (D16).
+- **Detection evaluator** implements D19, with the D13 rule kept for the sensitivity analysis. It matches pycocotools exactly on data without ignore regions.
+- **Speed benchmark harness** (D20): `scripts/bench_speed.py`.
+- **Smoke runs** SMOKE-01 to SMOKE-13 logged in [EXPERIMENT_LOG.md](EXPERIMENT_LOG.md). They are not results.
 
 ## In progress
 
-- Nothing.
+- Nothing; stopped at the end of this task.
 
 ## Blockers / open questions
 
-- MOT17 license confirmation from the dataset maintainers is pending (D12).
+- None blocking.
 
-## Next (waiting for approval)
+## Next (awaiting owner approval)
 
-- Inference pipeline and MOT writer.
-- Detection evaluator with ignore regions (D13).
+1. Formal Tier 1 baselines: E0–E2 on all 7 sequences, then the E3 tracker comparison.
+2. The H1 ablation (stage-2 association, own ByteTrack).
