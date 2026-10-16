@@ -250,3 +250,158 @@ Append-only, ADR-lite. To change a decision, add a new entry that states "Supers
 - **Consequences:**
   - The pipeline stage grows by about half a day, reducing the schedule buffer.
   - The evaluator reads the evaluation threshold from D10's config key, not from the training labels.
+
+## D14 — MOT17 license confirmed
+
+- **Date:** 2026-10-16
+- **Supersedes:** D12
+- **Context:** D12 assumed CC BY-NC-SA 3.0 because motchallenge.net is offline. The owner asked the MOTChallenge maintainers at TUM to confirm the license and three specific uses.
+- **Options considered:** keep the D12 assumption; adopt the maintainers' written confirmation.
+- **Decision:**
+  - MOT17 images and annotations are CC BY-NC-SA 3.0, confirmed by the MOTChallenge maintainers (TUM) by email on 2026-10-16. The reply notes that it is the sender's reading of the license, not legal advice.
+  - Provenance caveat from the same email: MOT17-05/06 come from the ETH dataset (Ess et al., ICCV 2007) and MOT17-01/02 from a publicly available video; the original sources' conditions may apply in addition.
+  - A demo video/GIF from MOT17 frames is allowed as a non-commercial, attributed derivative under CC BY-NC-SA 3.0. Demo material uses only sequences recorded by the MOTChallenge authors (MOT17-04, -11, -13), never 01/02/05/06.
+  - A private, non-shared copy on a cloud platform (e.g. Kaggle) for training is allowed. Publishing it as a Kaggle dataset or redistributing it otherwise is not. The exact Kaggle data path is decided at the fine-tuning stage.
+  - Required attribution: cite the MOT16 paper (Milan, Leal-Taixé, Reid, Roth, Schindler, arXiv:1603.00831) and link https://motchallenge.net/data/MOT17/.
+- **Rationale:** A written statement from the dataset maintainers is the best available primary source while the website is offline. Restricting demos to sequences the maintainers recorded themselves avoids the extra conditions of third-party sources.
+- **Consequences:**
+  - D12's open items are resolved: demo source (04, 11, 13) and Kaggle (private copy only).
+  - The repository still redistributes no MOT17 data.
+  - The correspondence is kept privately; no names or contact details appear in public files.
+
+## D15 — Pipeline architecture: detector interface, tracker adapters, detection cache
+
+- **Date:** 2026-10-16
+- **Context:** Tracker comparisons, detection evaluation and ablations must see identical detections, and repeated GPU inference is slow on a 4 GB laptop GPU.
+- **Options considered:**
+  - run the detector live in every experiment;
+  - cache detections once per detector configuration and sequence.
+- **Decision:**
+  - Accuracy experiments (tracker comparison, detection evaluation, ablations) read cached detections, so every tracker sees byte-identical detections.
+  - Cache key: (model weights SHA256, imgsz, precision, conf floor, sequence). Settings: conf floor 0.01, COCO class 0 (person) only, FP32, batch 1, default max_det. Record whether any frame hits max_det. Each consumer applies its own thresholds on top of the cache.
+  - Operating confidence for detection precision/recall: 0.25. Verified in ultralytics 8.4.177: it equals ByteTrack's default `track_high_thresh`. The full verified ByteTrack defaults are `track_high_thresh` 0.25, `track_low_thresh` 0.1, `new_track_thresh` 0.25, `track_buffer` 30, `match_thresh` 0.8, `fuse_score` True.
+  - Speed benchmarks run live end-to-end, never from cache.
+  - Trackers receive the sequence FPS from `seqinfo.ini` (MOT17-05 is 14 FPS), because `track_buffer` is counted in frames (implementation: D17).
+  - ReID stays off (the default) for all trackers in Tier 1.
+  - A cache-vs-live consistency test must pass before any official experiment.
+- **Rationale:** Caching removes detector nondeterminism and cost from tracker comparisons. Speed must include the detector, so it is always measured live.
+- **Consequences:**
+  - Cache files live under the git-ignored `/outputs/detections/`, with a metadata JSON per cache key.
+  - Ultralytics may be imported only in `src/cvdt/detect/` and in the tracker adapter module `src/cvdt/track/ultralytics_trackers.py`.
+
+## D16 — YOLO26 inference mode and cache contents
+
+- **Date:** 2026-10-16
+- **Status:** Proposed during implementation; approved by the project owner on 2026-10-16.
+- **Context:**
+  - YOLO26 checkpoints carry two heads: a one-to-one (NMS-free) head and a one-to-many head.
+  - In ultralytics 8.4.177 the predictor argument `nms` defaults to `None`, meaning "external NMS". The predictor then runs the one-to-many head followed by standard NMS (IoU 0.7). The NMS-free head is used only with `nms=False`. This also applies to `model.track()`.
+  - TrackTrack's track-aware initialisation (TAI) uses detections that a tight NMS dropped but a loose NMS (IoU 0.95) kept. `model.track()` recovers them from internal predictor state.
+- **Options considered:**
+  - library default (one-to-many head + NMS);
+  - NMS-free one-to-one head (`nms=False`);
+  - drop TAI recovery for TrackTrack.
+- **Decision:**
+  - Use the library default: one-to-many head + NMS at IoU 0.7.
+  - The cache also stores a second, loose-NMS pass (IoU 0.95) per frame. The TrackTrack adapter derives TAI's recovered detections from it with the library's own rule: loose boxes whose max IoU with any tight box is < 0.97.
+  - The cache key is extended with the NMS IoU, the loose-NMS IoU, the class filter and max_det.
+- **Rationale:** Tier 1 uses library defaults, and `model.track()` uses this mode. Keeping TAI recovery makes the library TrackTrack comparison faithful.
+- **Consequences:**
+  - The loose-NMS pass re-runs only NMS on the raw predictions of the single forward pass, as `model.track()` does, so caching and live tracking cost one forward pass per frame. The first implementation ran a second forward pass and was corrected on 2026-10-16.
+  - The NMS-free head (`nms=False`) is added to the speed study as a measured variant. It is not used in Tier 1 accuracy experiments.
+  - On MOT17-09 (yolo26s, 640, 50 frames) both modes give similar confidence distributions: about 1.6 person detections per frame in [0.1, 0.25) and 7.6 at ≥ 0.25 with NMS, versus 1.9 and 7.1 NMS-free. ByteTrack's second-stage band is thin.
+
+## D17 — Frame-rate scaling of the track buffer
+
+- **Date:** 2026-10-16
+- **Status:** Proposed during implementation; approved by the project owner on 2026-10-16.
+- **Context:**
+  - D15 requires trackers to receive the sequence FPS.
+  - In ultralytics 8.4.177 none of the six trackers accepts a frame rate: the lost-track lifetime is `track_buffer` frames regardless of FPS, and `model.track()` never passes FPS.
+  - Original ByteTrack uses `int(frame_rate / 30 * track_buffer)` frames.
+- **Options considered:**
+  - use `track_buffer` frames unscaled (identical to `model.track()`);
+  - scale `track_buffer` by FPS / 30 in the adapter, for all six trackers.
+- **Decision:** The adapter sets `track_buffer = int(fps / 30 * track_buffer)` before constructing any tracker, so the default of 30 frames means 1 s at every frame rate. The scaling can be switched off (`scale_buffer_by_fps=False`).
+- **Rationale:**
+  - It implements D15's intent (a buffer defined in time, not frames) with the original ByteTrack formula. MOT17-05 (14 FPS) would otherwise keep lost tracks for 2.1 s, and MOT17-13 (25 FPS) for 1.2 s.
+  - `track_buffer` is meant as roughly one second at 30 FPS. Without scaling, a 14 FPS sequence keeps lost tracks about twice as long in seconds. This is a documented deviation from the library default.
+  - Justified by data conventions and tracker semantics, not by smoke-run metrics; SMOKE-05/06 only quantify the effect.
+- **Consequences:**
+  - Identical to `model.track()` at 30 FPS (02, 04, 09, 10, 11).
+  - Differs on MOT17-05 (14 frames) and MOT17-13 (25 frames).
+
+## D18 — Pipeline implementation defaults
+
+- **Date:** 2026-10-16
+- **Status:** Proposed during implementation; approved by the project owner on 2026-10-16.
+- **Context:** Several thresholds and conventions were not fixed by D10, D13 or D15 but affect the numbers.
+- **Options considered:** per item, as listed under Decision.
+- **Decision:**
+  - **Tracker input threshold 0.1.** Tracker input is the cached detections filtered at conf ≥ 0.1, the default `conf` that `model.track()` uses ("trackers need low-confidence input"). Each tracker then applies its own thresholds.
+  - **GT clipped for detection evaluation.** Ground-truth boxes are clipped to the image before IoU in detection evaluation, since detectors cannot predict outside the frame. Tracking evaluation (TrackEval) uses the unclipped GT.
+  - **Secondary protocol keeps distractors as ignore regions.** D10's secondary protocol makes all pedestrians positive, but distractor classes (2, 7, 8, 12) remain ignore regions; only the visibility rule changes.
+  - **HOTA in percentage points.** HOTA, DetA, AssA, IDF1 and MOTA are reported in percentage points (×100), the unit of the 1.0-point rules in D9 and D11.
+  - **Unclipped track boxes.** Track boxes are written as the tracker's own state, which may extend beyond the image, because the MOT17 GT is full-extent. `model.track()` clips them; `clip_boxes=True` reproduces that exactly.
+- **Rationale:**
+  - 0.1 matches the library's own tracking path, which keeps Tier 1 "default".
+  - Clipping avoids penalising correct detections of border-cropped people.
+  - The secondary protocol isolates the visibility effect.
+  - Justified by data conventions and tracker semantics, not by smoke-run metrics; SMOKE-05/06 only quantify the effect.
+- **Consequences:**
+  - The cache-vs-live test uses 0.1 on both paths.
+  - Detection AP is not comparable to numbers computed on unclipped GT.
+
+## D19 — Ignore matching for low-visibility pedestrians
+
+- **Date:** 2026-10-16
+- **Supersedes:** D13, for the ignore-matching rule only; everything else in D13 stands (matching order, AP computation, operating point, unit tests, pycocotools cross-check).
+- **Context:**
+  - D13 removes an unmatched detection if its IoU with an ignore region is ≥ 0.5.
+  - Ignore regions for low-visibility pedestrians (visibility < 0.25, D10) are full-body (amodal) boxes, while detectors box the visible part.
+  - With yolo26s at 640 and conf ≥ 0.25, detections on such pedestrians that miss the IoU rule were 28% (MOT17-09) and 35% (MOT17-05) of all false positives (SMOKE-09).
+- **Options considered:**
+  - keep D13 (IoU ≥ 0.5 for all ignore regions);
+  - IoA for all ignore regions (COCO crowd style);
+  - IoU for distractor classes and IoA for low-visibility pedestrians, with a duplicate guard.
+- **Decision:** Per image and per IoU threshold, after one-to-one matching to positive GT, each unmatched detection is handled in this order:
+  1. **Duplicate guard.** An unmatched detection with IoU ≥ 0.5 against any positive GT box is a false positive and is never excused by an ignore region.
+  2. Otherwise, IoU ≥ 0.5 with a distractor-class ignore box (classes 2, 7, 8, 12) → removed (MOT precedent).
+  3. Otherwise, IoA ≥ 0.5 with a low-visibility pedestrian ignore box (visibility < 0.25, D10) → removed, where IoA = area(det ∩ ignore) / area(det).
+  4. Otherwise, false positive.
+- **Rationale:**
+  - The geometric mismatch was measured: detectors box the visible part, while the ignore box is full-body.
+  - Low-visibility ignore regions are this project's own rule (D10), with no MOT precedent, so the IoU precedent applies only to distractors.
+  - The duplicate guard closes the loophole that IoA would otherwise open, e.g. a duplicate box on a visible person lying inside the full-body box of an occluded person behind them, as in MOT17-02 frame 364.
+  - Under IoU-only matching, a fine-tuned model that learns full-body boxes would gain precision partly from the evaluation rule itself, confounding the pretrained-vs-fine-tuned comparison.
+- **Transparency:** The rule changed after smoke AP values were seen. The change is justified by the measured mechanism, not by AP. Every detection result is also reported under the D13 rule as a sensitivity analysis.
+- **Consequences:**
+  - The evaluator implements both rules (`ignore_rule="d19"`, the default, and `"d13"`).
+  - `scripts/eval_det.py` reports both.
+  - In the secondary protocol all pedestrians are positives, so only the duplicate guard and the distractor rule apply.
+
+## D20 — Real-time definition and speed protocol
+
+- **Date:** 2026-10-16
+- **Context:** D11 and the speed study need a fixed definition of "real-time". Frame decoding (JPEG read) was about 40% of per-frame time in SMOKE-08, so the definition must say whether it is included.
+- **Options considered:**
+  - end-to-end latency including decoding;
+  - perception latency from a decoded frame;
+  - throughput FPS;
+  - mean vs tail latency.
+- **Decision:**
+  - **Primary (perception latency).** Perception latency = preprocess + inference + postprocess + tracking, measured per frame from a decoded frame in memory, with CUDA synchronisation. Real-time if p95 ≤ 33.3 ms (30 FPS, the highest source frame rate in MOT17).
+  - **Secondary.** End-to-end latency including frame read / JPEG decode, and throughput FPS, are reported but not used for the threshold.
+  - **Excluded.** Rendering/visualisation and file writing are excluded.
+  - **Protocol:**
+    - Batch 1, 50 warm-up frames, ≥ 500 timed frames.
+    - Report p50 / p95 / p99 and peak GPU memory.
+    - Record AC power status, power profile, CPU governor, GPU clocks and performance state before and after. These are recorded only, system settings are not changed, and the benchmark stops if not on AC power.
+  - **Benchmark sequences.** MOT17-04 (1,050 frames, 1080p, densest scene, worst case for p95) and MOT17-05 (640×480).
+- **Rationale:**
+  - Decoding cost depends on the input source (JPEG files here, a camera or video decoder in deployment), not on the models under study.
+  - A p95 deadline reflects frames that arrive late, which a mean hides.
+  - 30 FPS is the fastest source in MOT17, so meeting it covers every sequence.
+- **Consequences:**
+  - D11's real-time condition uses this definition.
+  - `scripts/bench_speed.py` implements the protocol.
